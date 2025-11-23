@@ -1,3 +1,7 @@
+import csv
+import random
+
+
 class HeapNode():
     """
     Node in heap with value AND priority attributes.
@@ -221,7 +225,7 @@ class WeightedGraph:
         """
         return list(self.vertices)
 
-    def dijkstra_shortest_path(self, start_node, end_node, num_cars_on_edges=None):
+    def dijkstra_shortest_path(self, start_node, num_cars_on_edges=None):
         """
         :param start_node: - value of HeapNode to start at
         :param end_node: - value of HeapNode to at
@@ -257,7 +261,7 @@ class WeightedGraph:
                     distances_so_far.decreasePriority(neighbor, potential_new_path_length)
                     predecessors[neighbor] = current_shortest_node_value
 
-        return (self.extract_path(start_node, end_node, predecessors), final_distances[end_node])
+        return (final_distances)
 
     def get_edge_cost(self, weight, edge, num_cars_on_edge):
         """
@@ -344,3 +348,27 @@ def prepopulate_num_cars_at_t(graph):
         for neighbor in neighbors:
             result[((a, neighbor), 0)] = 0
     return result
+
+def dispatch_dashers(fname, base_sim):
+    with open(fname, 'r') as file:
+        reader = csv.reader(file)
+        next(reader)
+        for dasher_line in reader:
+            start_location = dasher_line[0]
+            start_time = int(dasher_line[1])
+            exit_time = int(dasher_line[2])
+            base_sim.schedule_at(start_time, "D", {'start location': str(start_location), 'start time': start_time, 'exit time': exit_time})
+
+
+# def schedule_tasks(fname, base_sim):
+#     with open(fname, 'r') as file:
+#         reader = csv.reader(file)
+#         next(reader)
+#         task_id = 1
+#         for dasher_line in reader:
+#             user_id, vertex, _, time = dasher_line
+#             user_id, vertex, time = int(user_id), int(vertex), int(time)
+#             appear_time = time - (random.randint(5, 30))
+#             reward = random.randint(1, 100) 
+#             base_sim.schedule_at(time, "T", {'task id': task_id, 'location': vertex, 'appear time': appear_time, 'target time': time, 'reward': reward})
+#             task_id += 1

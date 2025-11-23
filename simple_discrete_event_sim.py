@@ -4,7 +4,7 @@ import itertools
 import math
 import random
 from typing import Any, Optional, Tuple
-from helpers import read_graph, prepopulate_num_cars_at_t
+from helpers import dispatch_dashers, read_graph, prepopulate_num_cars_at_t
 
 """
 simple_discrete_event_sim.py
@@ -109,20 +109,24 @@ class BaselineSimulator:
             start_location = payload['start location']
             dasher_start_time = payload['start time']
             dasher_exit_time = payload['exit time']
-
+            
             self.available_dashers.append((start_location, dasher_start_time, dasher_exit_time))
 
+            # print(f'before: {self.available_dashers=}')
+            # print(f'{self.available_tasks=}')
             feasible_task_index = -1
             smallest_time = float('inf')
             for i, potential_task in enumerate(self.available_tasks):
                 task_location = potential_task[1] # index 1 is task's location
-                _, projected_time = graph.dijkstra_shortest_path(int(start_location), task_location)
+                _, projected_time = graph.dijkstra_shortest_path(str(start_location), task_location)
+                
+                # print(f'{task_location=}, {projected_time=}')
 
                 task_target_time = potential_task[3] # index 3 is task's target time
                 if (dasher_start_time + projected_time <= task_target_time)\
                     and (dasher_start_time + projected_time <= dasher_exit_time)\
                     and (projected_time < smallest_time):
-                    
+                    smallest_time = projected_time
                     feasible_task_index = i
             
             if not feasible_task_index == -1:
@@ -144,6 +148,8 @@ class BaselineSimulator:
 
                 # mark task as completed by removing it from available_tasks list
                 self.available_tasks.pop(feasible_task_index)
+
+                # print(f'after: {self.available_dashers=}')
                 
             else:
                 # feasible task not found; do nothing
@@ -190,7 +196,7 @@ class BaselineSimulator:
                 result += congestion
         
         return result
-
+'''
 class AlgorithmXSimulator:
     """
     Subclass and override handle(event_id, payload) with a switch-case.
@@ -399,44 +405,43 @@ def run_simulation_n_times(n, base=True):
             print(f'{average_congestion=}; {total_congestion=}')
         agent_file.close()
 
+'''
+
+import csv
+def schedule_tasks(fname, base_sim: BaselineSimulator):
+    with open(fname, 'r') as file:
+        reader = csv.reader(file)
+        next(reader)
+        task_id = 1
+        for dasher_line in reader:
+            user_id, vertex, _, time = dasher_line
+            user_id, vertex, time = int(user_id), int(vertex), int(time)
+            appear_time = time - (random.randint(5, 30))
+            reward = random.randint(1, 100) 
+            base_sim.schedule_at(time, "T", {'task id': task_id, 'location': vertex, 'appear time': appear_time, 'target time': time, 'reward': reward})
+            task_id += 1
+
 
 if __name__ == "__main__":
     ############## BASELINE SIMULATOR
-    graph = read_graph("/Users/gracejiang/Documents/Wellesley/4th Year/CS236/final/cs236-final-des/testing/graph2.txt")
-    # graph = read_graph("input/grid100.txt")
-    agent_file = open("/Users/gracejiang/Documents/Wellesley/4th Year/CS236/final/cs236-final-des/testing/agents2.txt", "r")
-    # agent_file = open("input/agents100.txt", "r")
-
+    graph = read_graph("grid100.txt")
     base_sim = BaselineSimulator(graph)
-    base_sim.schedule_at(0, "T", {'task id': 1, 'location': 1, 'appear time': 0, 'target time': 3, 'reward': 10})
-    base_sim.schedule_at(0, "T", {'task id': 2, 'location': 5, 'appear time': 0, 'target time': 3, 'reward': 10})
-    base_sim.schedule_at(0, "D", {'start location': 2, 'start time': 0, 'exit time': 10})
+    schedule_tasks("tasklog.csv", base_sim)
+    # base_sim.schedule_at(0, "T", {'task id': 1, 'location': 1, 'appear time': 0, 'target time': 1000, 'reward': 10})
+    # base_sim.schedule_at(0, "T", {'task id': 2, 'location': 10, 'appear time': 0, 'target time': 1000, 'reward': 10})
+    # dispatch_dashers("/Users/emmaculley/Desktop/cs236-final-des/testing/dashers.csv", base_sim)
+    # schedule_tasks("", base_sim) todo after get clarity on tasklog format
     base_sim.run()
     print(f'{base_sim.available_tasks=}')
-    # read the agents
-    # for agent_id, agent_line in enumerate(agent_file):
-    #     start_and_end_nodes = agent_line.strip().split(",")
-    #     start_node = start_and_end_nodes[0]
-    #     end_node = start_and_end_nodes[1]
+    print(f'{base_sim.available_dashers=}')
+    print(f'{base_sim.total_system_score=}')
 
-    #     random_time = float(random.randint(1, 10)) # randomize initial arrivals of all agents/cars
-
-    #     # run normal Dijkstra
-    #     initial_path, initial_path_total_cost = graph.dijkstra_shortest_path(start_node, end_node)
-    #     base_sim.initial_dijkstra_paths[agent_id] = initial_path # initial path is the predetermined list of nodes of path from start to end node
-
-    #     if len(initial_path) <= 1:
-    #         # if a car is starting and ending at same node, ignore it cuz it doesn't affect congestion
-    #         # this car stays in one spot, so its total time is zero
-    #         if not initial_path:
-    #             continue # there is no path from current start to end node: disregard
-    #         base_sim.detailed_path_record[agent_id] = [((initial_path[0], initial_path[0]), 0)]
-    #     if math.isinf(initial_path_total_cost):
-    #         continue # there is no path for these start and end nodes
-
-    #     first_edge_in_path = (initial_path[0], initial_path[0]) # FIRST EDGE is initial arrival, so we "arrive" at the VERY first node, hence the "artificial" edge from the first node to itself.
-    #     base_sim.schedule_at(random_time, "A", {"edge": first_edge_in_path, "id": agent_id})
-    # agent_file.close()
+    # base_sim = BaselineSimulator(graph)
+    # base_sim.schedule_at(0, "T", {'task id': 2, 'location': 5, 'appear time': 0, 'target time': 8, 'reward': 10})
+    # base_sim.schedule_at(0, "T", {'task id': 1, 'location': 2, 'appear time': 0, 'target time': 3, 'reward': 10})
+    # base_sim.schedule_at(0, "D", {'start location': 1, 'start time': 0, 'exit time': 10})
+    # base_sim.schedule_at(0, "D", {'start location': 1, 'start time': 1, 'exit time': 9})
+    # c
 
     # base_sim.run()
     # print('\nBaseline:')
