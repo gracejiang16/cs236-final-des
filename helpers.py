@@ -260,6 +260,7 @@ class WeightedGraph:
                     # if new path dist is smaller than what we already have, update
                     distances_so_far.decreasePriority(neighbor, potential_new_path_length)
                     predecessors[neighbor] = current_shortest_node_value
+        # print(f"dijkstra: {final_distances}")
 
         return (final_distances)
 
@@ -349,15 +350,15 @@ def prepopulate_num_cars_at_t(graph):
             result[((a, neighbor), 0)] = 0
     return result
 
-def dispatch_dashers(fname, base_sim):
-    with open(fname, 'r') as file:
-        reader = csv.reader(file)
-        next(reader)
-        for dasher_line in reader:
-            start_location = dasher_line[0]
-            start_time = int(dasher_line[1])
-            exit_time = int(dasher_line[2])
-            base_sim.schedule_at(start_time, "D", {'start location': str(start_location), 'start time': start_time, 'exit time': exit_time})
+# def dispatch_dashers(fname, base_sim):
+#     with open(fname, 'r') as file:
+#         reader = csv.reader(file)
+#         next(reader)
+#         for dasher_line in reader:
+#             start_location = dasher_line[0]
+#             start_time = int(dasher_line[1])
+#             exit_time = int(dasher_line[2])
+#             base_sim.schedule_at(start_time, "D", {'start location': str(start_location), 'start time': start_time, 'exit time': exit_time})
 
 
 # def schedule_tasks(fname, base_sim):

@@ -4,7 +4,8 @@ import itertools
 import math
 import random
 from typing import Any, Optional, Tuple
-from helpers import dispatch_dashers, read_graph, prepopulate_num_cars_at_t
+from helpers import read_graph, prepopulate_num_cars_at_t
+import csv
 
 """
 simple_discrete_event_sim.py
@@ -109,24 +110,23 @@ class BaselineSimulator:
             start_location = payload['start location']
             dasher_start_time = payload['start time']
             dasher_exit_time = payload['exit time']
-            
+
             self.available_dashers.append((start_location, dasher_start_time, dasher_exit_time))
 
             # print(f'before: {self.available_dashers=}')
             # print(f'{self.available_tasks=}')
             feasible_task_index = -1
             smallest_time = float('inf')
+            projected_times = graph.dijkstra_shortest_path(str(start_location))
             for i, potential_task in enumerate(self.available_tasks):
                 task_location = potential_task[1] # index 1 is task's location
-                _, projected_time = graph.dijkstra_shortest_path(str(start_location), task_location)
-                
                 # print(f'{task_location=}, {projected_time=}')
-
+                specific_time = projected_times[str(task_location)] # finding the time to each reward
                 task_target_time = potential_task[3] # index 3 is task's target time
-                if (dasher_start_time + projected_time <= task_target_time)\
-                    and (dasher_start_time + projected_time <= dasher_exit_time)\
-                    and (projected_time < smallest_time):
-                    smallest_time = projected_time
+                if (dasher_start_time + specific_time <= task_target_time)\
+                    and (dasher_start_time + specific_time <= dasher_exit_time)\
+                    and (specific_time < smallest_time):
+                    smallest_time = specific_time
                     feasible_task_index = i
             
             if not feasible_task_index == -1:
@@ -407,7 +407,17 @@ def run_simulation_n_times(n, base=True):
 
 '''
 
-import csv
+def dispatch_dashers(fname, base_sim: BaselineSimulator):
+    with open(fname, 'r') as file:
+        reader = csv.reader(file)
+        next(reader)
+        for dasher_line in reader:
+            start_location = dasher_line[0]
+            start_time = int(dasher_line[1])
+            exit_time = int(dasher_line[2])
+            base_sim.schedule_at(start_time, "D", {'start location': str(start_location), 'start time': start_time, 'exit time': exit_time})
+
+
 def schedule_tasks(fname, base_sim: BaselineSimulator):
     with open(fname, 'r') as file:
         reader = csv.reader(file)
@@ -429,7 +439,7 @@ if __name__ == "__main__":
     schedule_tasks("tasklog.csv", base_sim)
     # base_sim.schedule_at(0, "T", {'task id': 1, 'location': 1, 'appear time': 0, 'target time': 1000, 'reward': 10})
     # base_sim.schedule_at(0, "T", {'task id': 2, 'location': 10, 'appear time': 0, 'target time': 1000, 'reward': 10})
-    # dispatch_dashers("/Users/emmaculley/Desktop/cs236-final-des/testing/dashers.csv", base_sim)
+    dispatch_dashers("dashers.csv", base_sim)
     # schedule_tasks("", base_sim) todo after get clarity on tasklog format
     base_sim.run()
     print(f'{base_sim.available_tasks=}')
