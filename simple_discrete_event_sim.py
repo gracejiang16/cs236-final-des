@@ -141,7 +141,7 @@ class BaselineSimulator:
                 dasher_exit_time = payload['exit time'] # dasher's exit time stays same
 
                 # Schedule the next DasherArrival event
-                base_sim.schedule_at(new_dasher_start_time, "D", {'start location': new_start_location, 'start time': new_dasher_start_time, 'exit time': dasher_exit_time})
+                self.schedule_at(new_dasher_start_time, "D", {'start location': new_start_location, 'start time': new_dasher_start_time, 'exit time': dasher_exit_time})
 
                 # Add task's reward to the total-system-score
                 self.total_system_score += self.available_tasks[feasible_task_index][4]
@@ -196,9 +196,10 @@ class BaselineSimulator:
                 result += congestion
         
         return result
-'''
-class AlgorithmXSimulator:
+
+class SmartBrainSimulator:
     """
+    Smart Brain discrete-event simulator.
     Subclass and override handle(event_id, payload) with a switch-case.
     """
     def __init__(self, graph, start_time: float = 0.0) -> None:
@@ -208,10 +209,14 @@ class AlgorithmXSimulator:
         self._stopped = False
         self.events_processed = 0
         self.graph = graph
-        self.num_cars_on_edge_at_t = prepopulate_num_cars_at_t(graph)
-        self.initial_dijkstra_paths = {} # tracks our intially calcuated paths for each agents
-        self.detailed_path_record = {} # see paper for description
-        self.end_times = {} # agent_id: time it reached its destination node
+        # self.num_cars_on_edge_at_t = prepopulate_num_cars_at_t(graph)
+        # self.initial_dijkstra_paths = {} # tracks our intially calcuated paths for each agents
+        # self.detailed_path_record = {} # see paper for description
+        # self.end_times = {} # agent_id: time it reached its destination node
+        
+        self.available_tasks = [] # format is list of 5-tuples (task-id, location (vertex-id), appear-time, target-time, reward)
+        self.available_dashers = [] # list of 3-tuple dashers
+        self.total_system_score = 0
 
     def schedule_at(self, time: float, event_id: Any, payload: Any = None) -> EventHandle:
         if time < self.now:
@@ -262,46 +267,137 @@ class AlgorithmXSimulator:
     def handle(self, event_id: Any, payload: Any) -> None:
         """Override in a subclass with a simple switch (if/elif) on event_id."""
         current_time = self.now
-        id = payload['id'] # AGENT id, not event id
 
-        if event_id == 'A':
-            destination = payload['end'] # get final destination node
-            current_node = payload['arrival node']
+        if event_id == 'T': # TaskArrival
+            task_id = payload['task id']
+            location = payload['location']
+            appear_time = payload['appear time']
+            target_time = payload['target time']
+            reward = payload['reward']
 
-            if current_node == destination:
-                # the car has arrived at its destination, so it's done. record its end time
-                self.end_times[id] = current_time
-            else:
-                # getting next edge to traverse by running Dijkstra from the current node
-                path, _ = self.graph.dijkstra_shortest_path(current_node, destination)
-                if not path:
-                    # if path between these two nodes doesn't exist
-                    return
+            self.available_tasks.append((task_id, location, appear_time, target_time, reward))
+
+        elif event_id == 'DA': # DasherArrival
+            start_location = payload['start location']
+            dasher_start_time = payload['start time']
+            dasher_exit_time = payload['exit time']
+
+            new_dasher_start_time = self.now + 2 # todo can change time maybe
+
+            self.schedule_at(new_dasher_start_time, "DS", {'start location': start_location, 'start time': new_dasher_start_time, 'exit time': dasher_exit_time})
+        
+        elif event_id == 'DS': # DasherStart
+            start_location = payload['start location']
+            dasher_start_time = payload['start time']
+            dasher_exit_time = payload['exit time']
+
+            # print(f'DS: {start_location=}')
+
+            self.available_dashers.append((start_location, dasher_start_time, dasher_exit_time))
+
+            feasible_tasks = self.get_feasible_tasks_in_radius(start_location, 5, dasher_start_time, dasher_exit_time)
+            # print(f'{feasible_tasks=}')
+
+            # feasible task not found; make the dasher wait more time before searching for a task again
+            if not feasible_tasks:
+                if self.now < dasher_exit_time:
+                    # only make dasher wait if they don't have to exit yet; otherwise, just let the dasher disappear
+                    self.schedule_at(self.now, "DA", {'start location': start_location, 'start time': self.now, 'exit time': dasher_exit_time})
+                return
+            
+            print(f'{feasible_tasks=}')
+            best_task = max(feasible_tasks, key=lambda task: task[2]) # highest reward or potentiall highest reward-to-time ratio task
+            best_target_time = best_task[1]
+            best_reward = best_task[2]
+            best_ratio = best_reward / best_target_time
+            best_index = feasible_tasks.index(best_task)
+
+            # now, examine other tasks with rewards at least 70% of the best reward we've found so far
+            # if any of those tasks have a better reward-to-time ratio, do the task with that highest ratio
+            for i, potential_task in enumerate(filter(lambda task: task[2] >= 0.7*best_reward, feasible_tasks)):
+                potential_task_location = potential_task[0] # index 0 is task's location
+                potential_task_target_time = potential_task[1] # index 1 is task's target time
+                potential_reward = potential_task[2]
+                potential_ratio = potential_reward / potential_task_target_time
+                if potential_ratio > best_ratio:
+                    best_index = i
+                    best_ratio = potential_ratio
+                elif potential_ratio == best_ratio:
+                    if potential_reward > best_reward:
+                        best_index = i
+                        best_ratio = potential_ratio
+            
+            # if not best_index == -1: # ie we DID find a task for this dasher
+
+            try:
+                # mark dasher as unavailable
+                self.available_dashers.remove((start_location, dasher_start_time, dasher_exit_time))
+            except Exception:
+                print('dasher not available')
+
+            new_start_location = feasible_tasks[best_index][0] # dasher's new location is old task's location
+            new_dasher_start_time = feasible_tasks[best_index][1] # dasher's new start time is old task's target time
+            dasher_exit_time = payload['exit time'] # dasher's exit time stays same
+
+            actual_reward = feasible_tasks[best_index][2] # actual reward of the task the dasher is actually doing
+
+            # Schedule the next DasherArrival event
+            self.schedule_at(new_dasher_start_time, "DA", {'start location': new_start_location, 'start time': new_dasher_start_time, 'exit time': dasher_exit_time})
+
+            # Add task's reward to the total-system-score
+            self.total_system_score += feasible_tasks[best_index][2]
+
+            # print(f'{self.available_tasks=}')
+            # mark task as completed by removing it from available_tasks list
+            self.available_tasks = [t for t in self.available_tasks if not (t[1] == new_start_location and t[3] == new_dasher_start_time and t[4] == actual_reward)]
                 
-                next_edge = (path[0], path[1])
+            if best_index == -1:
+                # feasible task not found; make the dasher wait more time before searching for a task again
+                self.schedule_at(self.now, "DA", {'start location': new_start_location, 'start time': self.now, 'exit time': dasher_exit_time})
+    
+    def get_feasible_tasks_in_radius(self, start_node, radius, dasher_start_time, dasher_exit_time):
+        """
+        Given a node number and a radius, return list of nodes that are within that radius on a graph.
 
-                self.schedule_at(current_time, "D", {"edge": next_edge, "id": id, 'end': payload['end']})
+        :param start_node: - node id of where the center of the radius we want to check is
+        :param radius: - numerical num of radius we want to check around the start_node
+        :param dasher_start_time: - when dasher is starting to look for tasks. this param helps determine if a task will expire before the dasher can reach it, ie not be feasible
+        :param dasher_exit_time: - when dasher must leave simulation. this param helps determine if dasher has to leave before a task is completed, ie that task is not feasible for this dasher
 
-        elif event_id == 'D':
-            # first, update how many cars on the upcoming edge
-            next_edge = payload['edge']
-            self.num_cars_on_edge_at_t[(next_edge, current_time)] = self.num_cars_on_edge_at_t.get((next_edge, current_time), 0) + 1
+        :return: - a list of nodes with feasible (ie time-realistic) tasks in the format [(node, target time, reward), (node, target time, reward), etc.]
+        """
+        visited = set()
+        queue = [(start_node, 0)] # format [(node, level), (node, level), etc.]
+        result = [] # [(node, target time, reward), (node, target time, reward), etc.]
 
-            # then find how long it takes for this car to traverse this edge
-            a, b = next_edge
-            og_weight = self.graph.adj_list[a][b]
-            new_congestion_time = self.num_cars_on_edge_at_t[(next_edge, current_time)] * og_weight
+        while queue:
+            current_node, current_level = queue.pop(0)
 
-            arrival_time = current_time + new_congestion_time
-            self.schedule_at(arrival_time, "A", {"id": id, "arrival node": b, "end": payload['end']})
+            if current_level < radius:
+                for neighbor, _ in ((graph.getNeighbors(current_node)) + [(start_node, -1)]): # force start_node to be a "neighbor" so we can check if it has tasks
+                    neighbor = str(neighbor)
+                    if neighbor not in visited:
+                        visited.add(neighbor)
+                        queue.append((neighbor, current_level + 1))
 
-            if id not in self.detailed_path_record:
-                self.detailed_path_record[id] = [(next_edge, new_congestion_time)]
-            else:
-                self.detailed_path_record[id].append((next_edge, new_congestion_time))
+                        # check if there's any tasks at neighbor node (and possibly start node too)
+                        potential_tasks_at_neighbor = list(filter(lambda task: str(task[1]) == str(neighbor), self.available_tasks))
+                        if potential_tasks_at_neighbor:
+                            for potential_task in potential_tasks_at_neighbor:
+                                task_target_time = potential_task[3]
+                                task_appear_time = potential_task[2]
+                                reward = potential_task[4]
 
-        elif event_id == 'E':
-            pass
+                                # check if this potential task is feasible, ie can be completed in time
+                                if (current_level + dasher_start_time < task_target_time) \
+                                    and (current_level + dasher_start_time < dasher_exit_time) \
+                                    and (task_appear_time <= dasher_start_time + 2) \
+                                    and (dasher_exit_time >= task_target_time):
+                                    # btw, current_level = amount of time for dasher to reach "neighbor" from start_node
+                                    result.append((neighbor, task_target_time, reward))
+
+        return result
+
 
     def final_results_string(self):
         """
@@ -316,7 +412,7 @@ class AlgorithmXSimulator:
         # now construct strings of this format: "Car 1 (start_node, end_node), arrived at t=.., with path (e1,t1), (e2,t2), ..."
         for agent_id in range(len(self.detailed_path_record)):
             if agent_id not in self.detailed_path_record:
-                # this agent did not successfully find/traverse a path
+                # if there's no possible path for this agent
                 continue
             path = self.detailed_path_record[agent_id]
             current_car_summary = '\n'
@@ -344,68 +440,6 @@ class AlgorithmXSimulator:
         
         return result
 
-def run_simulation_n_times(n, base=True):
-    """
-    Runs a simulation n number of times, given the simulator type boolean flag (which could be Baseline or AlgorithmX)
-    
-    :return: - tuple in format (totalcongestion, averagecongestion)
-    """
-    # graph = read_graph("testing/graph2.txt")
-    graph = read_graph("input/graph1.txt")
-    # agent_file = open("testing/agents2.txt", "r")
-    agent_file = open("input/agents16.txt", "r")
-
-    if base:
-        for _ in range(n):
-            base_sim = BaselineSimulator(graph)
-            # read the agents
-            for agent_id, agent_line in enumerate(agent_file):
-                start_and_end_nodes = agent_line.strip().split(",")
-                start_node = start_and_end_nodes[0]
-                end_node = start_and_end_nodes[1]
-
-                random_time = float(random.randint(1, 10)) # randomize initial arrivals of all agents/cars
-
-                # run normal Dijkstra
-                initial_path, initial_path_total_cost = graph.dijkstra_shortest_path(start_node, end_node)
-                base_sim.initial_dijkstra_paths[agent_id] = initial_path # initial path is the predetermined list of nodes of path from start to end node
-
-                if len(initial_path) <= 1:
-                    # if a car is starting and ending at same node, ignore it cuz it doesn't affect congestion
-                    # this car stays in one spot, so its total time is zero
-                    base_sim.detailed_path_record[agent_id] = [((initial_path[0], initial_path[0]), 0)]
-                if math.isinf(initial_path_total_cost):
-                    continue # there is no path for these start and end nodes
-
-                first_edge_in_path = (initial_path[0], initial_path[0]) # FIRST EDGE is initial arrival, so we "arrive" at the VERY first node, hence the "artificial" edge from the first node to itself.
-                base_sim.schedule_at(random_time, "A", {"edge": first_edge_in_path, "id": agent_id})
-            # agent_file.close()
-
-            base_sim.run()
-            total_congestion = base_sim.calculate_total_congestion()
-            average_congestion = total_congestion / len(base_sim.detailed_path_record)
-            print(f'{average_congestion=}; {total_congestion=}')
-    else:
-        for _ in range(n):
-            algo_x_sim = AlgorithmXSimulator(graph)
-            # read the agents
-            for agent_id, agent_line in enumerate(agent_file):
-                start_and_end_nodes = agent_line.strip().split(",")
-                start_node = start_and_end_nodes[0]
-                end_node = start_and_end_nodes[1]
-
-                random_time = float(random.randint(1, 10)) # randomize initial arrivals of all agents/cars
-
-                first_edge_in_path = (start_node, start_node) # FIRST EDGE is initial arrival, so we "arrive" at the VERY first node, hence the "artificial" edge from the first node to itself.
-                algo_x_sim.schedule_at(random_time, "A", {"edge": first_edge_in_path, "id": agent_id, 'arrival node': start_node, 'end': end_node})
-
-            algo_x_sim.run()
-            total_congestion = algo_x_sim.calculate_total_congestion()
-            average_congestion = total_congestion / len(algo_x_sim.detailed_path_record)
-            print(f'{average_congestion=}; {total_congestion=}')
-        agent_file.close()
-
-'''
 
 def dispatch_dashers(fname, base_sim: BaselineSimulator):
     with open(fname, 'r') as file:
@@ -426,7 +460,7 @@ def schedule_tasks(fname, base_sim: BaselineSimulator):
         for dasher_line in reader:
             user_id, vertex, _, time = dasher_line
             user_id, vertex, time = int(user_id), int(vertex), int(time)
-            appear_time = time - (random.randint(5, 30))
+            appear_time = time - (random.randint(5, 10))
             reward = random.randint(1, 100) 
             base_sim.schedule_at(time, "T", {'task id': task_id, 'location': vertex, 'appear time': appear_time, 'target time': time, 'reward': reward})
             task_id += 1
@@ -434,17 +468,17 @@ def schedule_tasks(fname, base_sim: BaselineSimulator):
 
 if __name__ == "__main__":
     ############## BASELINE SIMULATOR
-    graph = read_graph("grid100.txt")
-    base_sim = BaselineSimulator(graph)
-    schedule_tasks("tasklog.csv", base_sim)
-    # base_sim.schedule_at(0, "T", {'task id': 1, 'location': 1, 'appear time': 0, 'target time': 1000, 'reward': 10})
-    # base_sim.schedule_at(0, "T", {'task id': 2, 'location': 10, 'appear time': 0, 'target time': 1000, 'reward': 10})
-    dispatch_dashers("dashers.csv", base_sim)
-    # schedule_tasks("", base_sim) todo after get clarity on tasklog format
-    base_sim.run()
-    print(f'{base_sim.available_tasks=}')
-    print(f'{base_sim.available_dashers=}')
-    print(f'{base_sim.total_system_score=}')
+    # graph = read_graph("grid100.txt")
+    # base_sim = BaselineSimulator(graph)
+    # schedule_tasks("tasklog.csv", base_sim)
+    # # base_sim.schedule_at(0, "T", {'task id': 1, 'location': 1, 'appear time': 0, 'target time': 1000, 'reward': 10})
+    # # base_sim.schedule_at(0, "T", {'task id': 2, 'location': 10, 'appear time': 0, 'target time': 1000, 'reward': 10})
+    # dispatch_dashers("dashers.csv", base_sim)
+    # # schedule_tasks("", base_sim) todo after get clarity on tasklog format
+    # base_sim.run()
+    # # print(f'{base_sim.available_tasks=}')
+    # # print(f'{base_sim.available_dashers=}')
+    # print(f'{base_sim.total_system_score=}')
 
     # base_sim = BaselineSimulator(graph)
     # base_sim.schedule_at(0, "T", {'task id': 2, 'location': 5, 'appear time': 0, 'target time': 8, 'reward': 10})
@@ -457,25 +491,20 @@ if __name__ == "__main__":
     # print('\nBaseline:')
     # print(base_sim.final_results_string())
 
-    ########## ALGO X SIMULATOR
-    # # graph = read_graph("testing/graph2.txt")
-    # graph = read_graph("input/grid100.txt")
-    # # agent_file = open("testing/agents2.txt", "r")
-    # agent_file = open("input/agents100.txt", "r")
+    ########## SMART BRAIN SIMULATOR
+    graph = read_graph("grid100.txt")
+    smart_sim = SmartBrainSimulator(graph)
+    smart_sim.schedule_at(0, "T", {'task id': 1, 'location': '1', 'appear time': 0, 'target time': 10, 'reward': 100})
+    smart_sim.schedule_at(0, "T", {'task id': 2, 'location': '50', 'appear time': 0, 'target time': 10, 'reward': 10})
+    smart_sim.schedule_at(0, "T", {'task id': 3, 'location': '5', 'appear time': 2, 'target time': 10, 'reward': 101})
+    smart_sim.schedule_at(0, "DA", {'start location': '5', 'start time': 1, 'exit time': 50})
+    smart_sim.schedule_at(0, "DA", {'start location': '49', 'start time': 0, 'exit time': 50})
+    smart_sim.schedule_at(0, "DA", {'start location': '60', 'start time': 0, 'exit time': 50})
+    smart_sim.run()
+    print(f'{smart_sim.total_system_score=}')
+    # feas_tasks = smart_sim.get_feasible_tasks_in_radius('5', 5, 0, 20000)
+    # print(f'{feas_tasks=}')
 
-    # algo_x_sim = AlgorithmXSimulator(graph)
-    # # read the agents
-    # for agent_id, agent_line in enumerate(agent_file):
-    #     start_and_end_nodes = agent_line.strip().split(",")
-    #     start_node = start_and_end_nodes[0]
-    #     end_node = start_and_end_nodes[1]
-
-    #     random_time = float(random.randint(1, 10)) # randomize initial arrivals of all agents/cars
-
-    #     first_edge_in_path = (start_node, start_node) # FIRST EDGE is initial arrival, so we "arrive" at the VERY first node, hence the "artificial" edge from the first node to itself.
-    #     algo_x_sim.schedule_at(random_time, "A", {"edge": first_edge_in_path, "id": agent_id, 'arrival node': start_node, 'end': end_node})
-    # agent_file.close()
-
-    # algo_x_sim.run()
-    # print('\nAlgorithmX:')
-    # print(algo_x_sim.final_results_string())
+    # dispatch_dashers("dashers.csv", smart_sim)
+    # smart_sim.run()
+    # print(f'{smart_sim.total_system_score=}')
