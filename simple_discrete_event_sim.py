@@ -6,6 +6,7 @@ import random
 from typing import Any, Optional, Tuple
 from helpers import read_graph, prepopulate_num_cars_at_t
 import csv
+import pandas as pd
 
 """
 simple_discrete_event_sim.py
@@ -114,7 +115,6 @@ class BaselineSimulator:
             self.available_dashers.append((start_location, dasher_start_time, dasher_exit_time))
 
             # print(f'before: {self.available_dashers=}')
-            # print(f'{self.available_tasks=}')
             feasible_task_index = -1
             smallest_time = float('inf')
             projected_times = graph.dijkstra_shortest_path(str(start_location))
@@ -145,6 +145,7 @@ class BaselineSimulator:
 
                 # Add task's reward to the total-system-score
                 self.total_system_score += self.available_tasks[feasible_task_index][4]
+                # print(f'{self.total_system_score=}')
 
                 # mark task as completed by removing it from available_tasks list
                 self.available_tasks.pop(feasible_task_index)
@@ -276,6 +277,7 @@ class SmartBrainSimulator:
             reward = payload['reward']
 
             self.available_tasks.append((task_id, location, appear_time, target_time, reward))
+            # print(f'{location=}')
 
         elif event_id == 'DA': # DasherArrival
             start_location = payload['start location']
@@ -283,6 +285,7 @@ class SmartBrainSimulator:
             dasher_exit_time = payload['exit time']
 
             new_dasher_start_time = self.now + 2 # todo can change time maybe
+            # print(f'{start_location=}')
 
             self.schedule_at(new_dasher_start_time, "DS", {'start location': start_location, 'start time': new_dasher_start_time, 'exit time': dasher_exit_time})
         
@@ -305,7 +308,7 @@ class SmartBrainSimulator:
                     self.schedule_at(self.now, "DA", {'start location': start_location, 'start time': self.now, 'exit time': dasher_exit_time})
                 return
             
-            print(f'{feasible_tasks=}')
+            # print(f'{feasible_tasks=}')
             best_task = max(feasible_tasks, key=lambda task: task[2]) # highest reward or potentiall highest reward-to-time ratio task
             best_target_time = best_task[1]
             best_reward = best_task[2]
@@ -376,12 +379,15 @@ class SmartBrainSimulator:
             if current_level < radius:
                 for neighbor, _ in ((graph.getNeighbors(current_node)) + [(start_node, -1)]): # force start_node to be a "neighbor" so we can check if it has tasks
                     neighbor = str(neighbor)
+                    # print(f'{neighbor=}')
                     if neighbor not in visited:
                         visited.add(neighbor)
+                        # print(f'{neighbor=}')
                         queue.append((neighbor, current_level + 1))
 
                         # check if there's any tasks at neighbor node (and possibly start node too)
                         potential_tasks_at_neighbor = list(filter(lambda task: str(task[1]) == str(neighbor), self.available_tasks))
+                        # print(f'{potential_tasks_at_neighbor=}')
                         if potential_tasks_at_neighbor:
                             for potential_task in potential_tasks_at_neighbor:
                                 task_target_time = potential_task[3]
@@ -389,13 +395,14 @@ class SmartBrainSimulator:
                                 reward = potential_task[4]
 
                                 # check if this potential task is feasible, ie can be completed in time
-                                if (current_level + dasher_start_time < task_target_time) \
-                                    and (current_level + dasher_start_time < dasher_exit_time) \
+                                if (current_level + dasher_start_time <= task_target_time) \
+                                    and (current_level + dasher_start_time <= dasher_exit_time) \
                                     and (task_appear_time <= dasher_start_time + 2) \
                                     and (dasher_exit_time >= task_target_time):
+                                    # print("here")
                                     # btw, current_level = amount of time for dasher to reach "neighbor" from start_node
                                     result.append((neighbor, task_target_time, reward))
-
+        # print(f'{result=}')
         return result
 
 
@@ -449,10 +456,11 @@ def dispatch_dashers(fname, base_sim: BaselineSimulator):
             start_location = dasher_line[0]
             start_time = int(dasher_line[1])
             exit_time = int(dasher_line[2])
-            base_sim.schedule_at(start_time, "D", {'start location': str(start_location), 'start time': start_time, 'exit time': exit_time})
+            base_sim.schedule_at(start_time, "DA", {'start location': str(start_location), 'start time': start_time, 'exit time': exit_time})
 
 
-def schedule_tasks(fname, base_sim: BaselineSimulator):
+
+def schedule_tasks(fname, base_sim):
     with open(fname, 'r') as file:
         reader = csv.reader(file)
         next(reader)
@@ -462,8 +470,18 @@ def schedule_tasks(fname, base_sim: BaselineSimulator):
             user_id, vertex, time = int(user_id), int(vertex), int(time)
             appear_time = time - (random.randint(5, 10))
             reward = random.randint(1, 100) 
-            base_sim.schedule_at(time, "T", {'task id': task_id, 'location': vertex, 'appear time': appear_time, 'target time': time, 'reward': reward})
+            base_sim.schedule_at(time, "T", {'task id': task_id, 'location': str(vertex), 'appear time': appear_time, 'target time': time, 'reward': reward})
+            info = {
+            "task id": task_id,
+            "location": str(vertex),
+            "appear time": appear_time,
+            "target time": time,
+            "reward": reward
+            }
+            print((time, "T", info))
+
             task_id += 1
+
 
 
 if __name__ == "__main__":
@@ -494,17 +512,35 @@ if __name__ == "__main__":
     ########## SMART BRAIN SIMULATOR
     graph = read_graph("grid100.txt")
     smart_sim = SmartBrainSimulator(graph)
-    smart_sim.schedule_at(0, "T", {'task id': 1, 'location': '1', 'appear time': 0, 'target time': 10, 'reward': 100})
-    smart_sim.schedule_at(0, "T", {'task id': 2, 'location': '50', 'appear time': 0, 'target time': 10, 'reward': 10})
-    smart_sim.schedule_at(0, "T", {'task id': 3, 'location': '5', 'appear time': 2, 'target time': 10, 'reward': 101})
-    smart_sim.schedule_at(0, "DA", {'start location': '5', 'start time': 1, 'exit time': 50})
-    smart_sim.schedule_at(0, "DA", {'start location': '49', 'start time': 0, 'exit time': 50})
-    smart_sim.schedule_at(0, "DA", {'start location': '60', 'start time': 0, 'exit time': 50})
-    smart_sim.run()
-    print(f'{smart_sim.total_system_score=}')
-    # feas_tasks = smart_sim.get_feasible_tasks_in_radius('5', 5, 0, 20000)
-    # print(f'{feas_tasks=}')
+    # smart_sim.schedule_at(0, "T", {'task id': 1, 'location': '1', 'appear time': 0, 'target time': 10, 'reward': 100})
+    # smart_sim.schedule_at(0, "T", {'task id': 2, 'location': '50', 'appear time': 0, 'target time': 10, 'reward': 10})
+    # smart_sim.schedule_at(0, "T", {'task id': 3, 'location': '5', 'appear time': 2, 'target time': 10, 'reward': 101})
+    # smart_sim.schedule_at(0, "DA", {'start location': '5', 'start time': 1, 'exit time': 50})
+    # smart_sim.schedule_at(0, "DA", {'start location': '49', 'start time': 0, 'exit time': 50})
+    # smart_sim.schedule_at(0, "DA", {'start location': '60', 'start time': 0, 'exit time': 50})
 
-    # dispatch_dashers("dashers.csv", smart_sim)
+
+
+    #### tests emma added #####
+    # smart_sim.schedule_at(0, "T", {'task id': 1, 'location': '0', 'appear time': 10, 'target time': 25, 'reward': 45})
+    # smart_sim.schedule_at(0, "T", {'task id': 2, 'location': '32', 'appear time': 6, 'target time': 16, 'reward': 23})
+    # smart_sim.schedule_at(0, "T", {'task id': 3, 'location': '9', 'appear time': 13, 'target time': 30, 'reward':  90})
+    # smart_sim.schedule_at(0, "DA", {'start location': '20', 'start time': 5, 'exit time': 50})
+    # smart_sim.schedule_at(0, "DA", {'start location': '37', 'start time': 0, 'exit time': 50})
+    # smart_sim.schedule_at(0, "DA", {'start location': '6', 'start time': 4, 'exit time': 50})
+
+
+
     # smart_sim.run()
     # print(f'{smart_sim.total_system_score=}')
+    # feas_tasks = smart_sim.get_feasible_tasks_in_radius('5', 5, 0, 20000)
+    # print(f'{feas_tasks=}')
+    schedule_tasks("tasklog.csv", smart_sim)
+    dispatch_dashers("dashers.csv", smart_sim)
+    smart_sim.run()
+    print(f'{smart_sim.total_system_score=}')
+
+
+ ### Machine Learning Forecasting ###
+columns = ["task_id", "location", "appear_time", "target_time", "reward"]
+# df = pd.DataFrame(self.available_tasks, columns=columns)
