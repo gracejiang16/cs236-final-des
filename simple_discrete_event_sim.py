@@ -7,6 +7,10 @@ from typing import Any, Optional, Tuple
 from helpers import read_graph, prepopulate_num_cars_at_t
 import csv
 import pandas as pd
+from xgboost import XGBRegressor
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error
+import ast
 
 """
 simple_discrete_event_sim.py
@@ -471,14 +475,14 @@ def schedule_tasks(fname, base_sim):
             appear_time = time - (random.randint(5, 10))
             reward = random.randint(1, 100) 
             base_sim.schedule_at(time, "T", {'task id': task_id, 'location': str(vertex), 'appear time': appear_time, 'target time': time, 'reward': reward})
-            info = {
-            "task id": task_id,
-            "location": str(vertex),
-            "appear time": appear_time,
-            "target time": time,
-            "reward": reward
-            }
-            print((time, "T", info))
+            # info = {
+            # "task id": task_id,
+            # "location": str(vertex),
+            # "appear time": appear_time,
+            # "target time": time,
+            # "reward": reward
+            # }
+            # print((time, "T", info))
 
             task_id += 1
 
@@ -510,8 +514,8 @@ if __name__ == "__main__":
     # print(base_sim.final_results_string())
 
     ########## SMART BRAIN SIMULATOR
-    graph = read_graph("grid100.txt")
-    smart_sim = SmartBrainSimulator(graph)
+    # graph = read_graph("grid100.txt")
+    # smart_sim = SmartBrainSimulator(graph)
     # smart_sim.schedule_at(0, "T", {'task id': 1, 'location': '1', 'appear time': 0, 'target time': 10, 'reward': 100})
     # smart_sim.schedule_at(0, "T", {'task id': 2, 'location': '50', 'appear time': 0, 'target time': 10, 'reward': 10})
     # smart_sim.schedule_at(0, "T", {'task id': 3, 'location': '5', 'appear time': 2, 'target time': 10, 'reward': 101})
@@ -535,12 +539,72 @@ if __name__ == "__main__":
     # print(f'{smart_sim.total_system_score=}')
     # feas_tasks = smart_sim.get_feasible_tasks_in_radius('5', 5, 0, 20000)
     # print(f'{feas_tasks=}')
-    schedule_tasks("tasklog.csv", smart_sim)
-    dispatch_dashers("dashers.csv", smart_sim)
-    smart_sim.run()
-    print(f'{smart_sim.total_system_score=}')
+    # schedule_tasks("tasklog.csv", smart_sim)
+    # dispatch_dashers("dashers.csv", smart_sim)
+    # smart_sim.run()
+    # print(f'{smart_sim.total_system_score=}')
 
 
  ### Machine Learning Forecasting ###
-columns = ["task_id", "location", "appear_time", "target_time", "reward"]
-# df = pd.DataFrame(self.available_tasks, columns=columns)
+
+
+# ============================
+# 1. Load and parse TXT file
+# ============================
+    rows = []
+
+    with open("available_tasks.txt", "r") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+
+            # Each line looks like:
+            # (1080, 'T', {'task id': 1, 'location': '38', ...})
+            timestamp, tag, data = ast.literal_eval(line)
+
+            row = {
+                "timestamp": int(timestamp),
+                "task_id": int(data["task id"]),
+                "location": int(data["location"]),
+                "appear_time": int(data["appear time"]),
+                "target_time": int(data["target time"]),
+                "reward": int(data["reward"]),
+            }
+            rows.append(row)
+
+    df = pd.DataFrame(rows)
+    print("Loaded dataset:")
+    print(df.head())
+
+    # ============================
+    # 2. Features/target
+    # ============================
+    X = df[["task_id", "location", "appear_time", "target_time"]]
+    y = df["reward"]
+
+    # ============================
+    # 3. Train/test split
+    # ============================
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42
+    )
+
+    # ============================
+    # 4. Train XGBoost model
+    # ============================
+    model = XGBRegressor(
+        n_estimators=300,
+        max_depth=6,
+        learning_rate=0.1,
+    )
+
+    model.fit(X_train, y_train)
+
+    # ============================
+    # 5. Evaluate
+    # ============================
+    preds = model.predict(X_test)
+    rmse = mean_squared_error(y_test, preds, squared=False)
+
+    print("\nRMSE:", rmse)
