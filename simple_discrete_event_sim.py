@@ -1,15 +1,16 @@
 from __future__ import annotations
 import heapq
 import itertools
+import json
 import math
 import random
 from typing import Any, Optional, Tuple
 from helpers import read_graph, prepopulate_num_cars_at_t
 import csv
-import pandas as pd
-from xgboost import XGBRegressor
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import mean_squared_error
+# import pandas as pd
+# from xgboost import XGBRegressor
+# from sklearn.model_selection import train_test_split
+# from sklearn.metrics import mean_squared_error
 import ast
 
 """
@@ -452,7 +453,7 @@ class SmartBrainSimulator:
         return result
 
 
-def dispatch_dashers(fname, base_sim: BaselineSimulator):
+def baseline_dispatch_dashers(fname, base_sim: BaselineSimulator):
     with open(fname, 'r') as file:
         reader = csv.reader(file)
         next(reader)
@@ -460,47 +461,43 @@ def dispatch_dashers(fname, base_sim: BaselineSimulator):
             start_location = dasher_line[0]
             start_time = int(dasher_line[1])
             exit_time = int(dasher_line[2])
-            base_sim.schedule_at(start_time, "DA", {'start location': str(start_location), 'start time': start_time, 'exit time': exit_time})
+            base_sim.schedule_at(start_time, "D", {'start location': str(start_location), 'start time': start_time, 'exit time': exit_time})
 
 
-
-def schedule_tasks(fname, base_sim):
+def smart_dispatch_dashers(fname, smart_sim: SmartBrainSimulator):
     with open(fname, 'r') as file:
         reader = csv.reader(file)
         next(reader)
-        task_id = 1
         for dasher_line in reader:
-            user_id, vertex, _, time = dasher_line
-            user_id, vertex, time = int(user_id), int(vertex), int(time)
-            appear_time = time - (random.randint(5, 10))
-            reward = random.randint(1, 100) 
-            base_sim.schedule_at(time, "T", {'task id': task_id, 'location': str(vertex), 'appear time': appear_time, 'target time': time, 'reward': reward})
-            # info = {
-            # "task id": task_id,
-            # "location": str(vertex),
-            # "appear time": appear_time,
-            # "target time": time,
-            # "reward": reward
-            # }
-            # print((time, "T", info))
+            start_location = dasher_line[0]
+            start_time = int(dasher_line[1])
+            exit_time = int(dasher_line[2])
+            smart_sim.schedule_at(start_time, "DA", {'start location': str(start_location), 'start time': start_time, 'exit time': exit_time})
 
-            task_id += 1
+
+def schedule_tasks(fname, base_sim):
+    task_payloads = []
+    with open(fname, "r") as f:
+        task_payloads = json.load(f)
+    
+    for payload in task_payloads:
+        time = payload['target time']
+        base_sim.schedule_at(time, "T", payload)
 
 
 
 if __name__ == "__main__":
     ############## BASELINE SIMULATOR
-    # graph = read_graph("grid100.txt")
-    # base_sim = BaselineSimulator(graph)
-    # schedule_tasks("tasklog.csv", base_sim)
-    # # base_sim.schedule_at(0, "T", {'task id': 1, 'location': 1, 'appear time': 0, 'target time': 1000, 'reward': 10})
-    # # base_sim.schedule_at(0, "T", {'task id': 2, 'location': 10, 'appear time': 0, 'target time': 1000, 'reward': 10})
-    # dispatch_dashers("dashers.csv", base_sim)
-    # # schedule_tasks("", base_sim) todo after get clarity on tasklog format
-    # base_sim.run()
-    # # print(f'{base_sim.available_tasks=}')
-    # # print(f'{base_sim.available_dashers=}')
-    # print(f'{base_sim.total_system_score=}')
+    graph = read_graph("grid100.txt")
+    base_sim = BaselineSimulator(graph)
+    schedule_tasks("tasks_random_rewards_and_times.json", base_sim)
+    baseline_dispatch_dashers("dashers.csv", base_sim)
+    # base_sim.schedule_at(0, "T", {'task id': 1, 'location': 1, 'appear time': 0, 'target time': 1000, 'reward': 10})
+    # base_sim.schedule_at(0, "T", {'task id': 2, 'location': 10, 'appear time': 0, 'target time': 1000, 'reward': 10})
+    base_sim.run()
+    # print(f'{base_sim.available_tasks=}')
+    # print(f'{base_sim.available_dashers=}')
+    print(f'{base_sim.total_system_score=}')
 
     # base_sim = BaselineSimulator(graph)
     # base_sim.schedule_at(0, "T", {'task id': 2, 'location': 5, 'appear time': 0, 'target time': 8, 'reward': 10})
@@ -514,8 +511,8 @@ if __name__ == "__main__":
     # print(base_sim.final_results_string())
 
     ########## SMART BRAIN SIMULATOR
-    # graph = read_graph("grid100.txt")
-    # smart_sim = SmartBrainSimulator(graph)
+    graph = read_graph("grid100.txt")
+    smart_sim = SmartBrainSimulator(graph)
     # smart_sim.schedule_at(0, "T", {'task id': 1, 'location': '1', 'appear time': 0, 'target time': 10, 'reward': 100})
     # smart_sim.schedule_at(0, "T", {'task id': 2, 'location': '50', 'appear time': 0, 'target time': 10, 'reward': 10})
     # smart_sim.schedule_at(0, "T", {'task id': 3, 'location': '5', 'appear time': 2, 'target time': 10, 'reward': 101})
@@ -534,77 +531,73 @@ if __name__ == "__main__":
     # smart_sim.schedule_at(0, "DA", {'start location': '6', 'start time': 4, 'exit time': 50})
 
 
-
-    # smart_sim.run()
-    # print(f'{smart_sim.total_system_score=}')
-    # feas_tasks = smart_sim.get_feasible_tasks_in_radius('5', 5, 0, 20000)
-    # print(f'{feas_tasks=}')
-    # schedule_tasks("tasklog.csv", smart_sim)
-    # dispatch_dashers("dashers.csv", smart_sim)
-    # smart_sim.run()
-    # print(f'{smart_sim.total_system_score=}')
+    feas_tasks = smart_sim.get_feasible_tasks_in_radius('5', 5, 0, 20000)
+    schedule_tasks("tasks_random_rewards_and_times.json", smart_sim)
+    smart_dispatch_dashers("dashers.csv", smart_sim)
+    smart_sim.run()
+    print(f'{smart_sim.total_system_score=}')
 
 
  ### Machine Learning Forecasting ###
 
 
-# ============================
-# 1. Load and parse TXT file
-# ============================
-    rows = []
+# # ============================
+# # 1. Load and parse TXT file
+# # ============================
+#     rows = []
 
-    with open("available_tasks.txt", "r") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
+#     with open("available_tasks.txt", "r") as f:
+#         for line in f:
+#             line = line.strip()
+#             if not line:
+#                 continue
 
-            # Each line looks like:
-            # (1080, 'T', {'task id': 1, 'location': '38', ...})
-            timestamp, tag, data = ast.literal_eval(line)
+#             # Each line looks like:
+#             # (1080, 'T', {'task id': 1, 'location': '38', ...})
+#             timestamp, tag, data = ast.literal_eval(line)
 
-            row = {
-                "timestamp": int(timestamp),
-                "task_id": int(data["task id"]),
-                "location": int(data["location"]),
-                "appear_time": int(data["appear time"]),
-                "target_time": int(data["target time"]),
-                "reward": int(data["reward"]),
-            }
-            rows.append(row)
+#             row = {
+#                 "timestamp": int(timestamp),
+#                 "task_id": int(data["task id"]),
+#                 "location": int(data["location"]),
+#                 "appear_time": int(data["appear time"]),
+#                 "target_time": int(data["target time"]),
+#                 "reward": int(data["reward"]),
+#             }
+#             rows.append(row)
 
-    df = pd.DataFrame(rows)
-    print("Loaded dataset:")
-    print(df.head())
+#     df = pd.DataFrame(rows)
+#     print("Loaded dataset:")
+#     print(df.head())
 
-    # ============================
-    # 2. Features/target
-    # ============================
-    X = df[["task_id", "location", "appear_time", "target_time"]]
-    y = df["reward"]
+#     # ============================
+#     # 2. Features/target
+#     # ============================
+#     X = df[["task_id", "location", "appear_time", "target_time"]]
+#     y = df["reward"]
 
-    # ============================
-    # 3. Train/test split
-    # ============================
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42
-    )
+#     # ============================
+#     # 3. Train/test split
+#     # ============================
+#     X_train, X_test, y_train, y_test = train_test_split(
+#         X, y, test_size=0.2, random_state=42
+#     )
 
-    # ============================
-    # 4. Train XGBoost model
-    # ============================
-    model = XGBRegressor(
-        n_estimators=300,
-        max_depth=6,
-        learning_rate=0.1,
-    )
+#     # ============================
+#     # 4. Train XGBoost model
+#     # ============================
+#     model = XGBRegressor(
+#         n_estimators=300,
+#         max_depth=6,
+#         learning_rate=0.1,
+#     )
 
-    model.fit(X_train, y_train)
+#     model.fit(X_train, y_train)
 
-    # ============================
-    # 5. Evaluate
-    # ============================
-    preds = model.predict(X_test)
-    rmse = mean_squared_error(y_test, preds, squared=False)
+#     # ============================
+#     # 5. Evaluate
+#     # ============================
+#     preds = model.predict(X_test)
+#     rmse = mean_squared_error(y_test, preds, squared=False)
 
-    print("\nRMSE:", rmse)
+#     print("\nRMSE:", rmse)
