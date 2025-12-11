@@ -2,10 +2,8 @@ from __future__ import annotations
 import heapq
 import itertools
 import json
-import math
-import random
 from typing import Any, Optional, Tuple
-from helpers import read_graph, prepopulate_num_cars_at_t
+from helpers import read_graph
 import csv
 # import pandas as pd
 # from xgboost import XGBRegressor
@@ -43,12 +41,9 @@ class BaselineSimulator:
         self._seq = itertools.count()
         self._stopped = False
         self.events_processed = 0
+
         self.graph = graph
-        self.num_cars_on_edge_at_t = prepopulate_num_cars_at_t(graph)
-        self.initial_dijkstra_paths = {} # tracks our intially calcuated paths for each agents
-        self.detailed_path_record = {} # see paper for description
-        self.end_times = {} # agent_id: time it reached its destination node
-        
+        self.num_tasks = 0 # num tasks successfully completed
         self.available_tasks = [] # format is list of 5-tuples (task-id, location (vertex-id), appear-time, target-time, reward)
         self.available_dashers = [] # list of 3-tuple dashers
         self.total_system_score = 0
@@ -101,7 +96,6 @@ class BaselineSimulator:
 
     def handle(self, event_id: Any, payload: Any) -> None:
         """Override in a subclass with a simple switch (if/elif) on event_id."""
-        current_time = self.now
 
         if event_id == 'T': # TaskArrival
             task_id = payload['task id']
@@ -119,13 +113,11 @@ class BaselineSimulator:
 
             self.available_dashers.append((start_location, dasher_start_time, dasher_exit_time))
 
-            # print(f'before: {self.available_dashers=}')
             feasible_task_index = -1
             smallest_time = float('inf')
             projected_times = graph.dijkstra_shortest_path(str(start_location))
             for i, potential_task in enumerate(self.available_tasks):
                 task_location = potential_task[1] # index 1 is task's location
-                # print(f'{task_location=}, {projected_time=}')
                 specific_time = projected_times[str(task_location)] # finding the time to each reward
                 task_target_time = potential_task[3] # index 3 is task's target time
                 if (dasher_start_time + specific_time <= task_target_time)\
@@ -150,58 +142,15 @@ class BaselineSimulator:
 
                 # Add task's reward to the total-system-score
                 self.total_system_score += self.available_tasks[feasible_task_index][4]
-                # print(f'{self.total_system_score=}')
+                self.num_tasks += 1
 
                 # mark task as completed by removing it from available_tasks list
                 self.available_tasks.pop(feasible_task_index)
-
-                # print(f'after: {self.available_dashers=}')
                 
             else:
                 # feasible task not found; do nothing
                 pass
 
-    def final_results_string(self):
-        """
-        Function to calculate final statistics and make correct format for output printing.
-        Only invoke this function after the simulator is done running.
-        """
-        total_congestion = self.calculate_total_congestion()
-        average_congestion = total_congestion / len(self.detailed_path_record)
-
-        output_string = ""
-
-        # now construct strings of this format: "Car 1 (start_node, end_node), arrived at t=.., with path (e1,t1), (e2,t2), ..."
-        for agent_id in range(len(self.detailed_path_record)):
-            if agent_id not in self.detailed_path_record:
-                # if there's no possible path for this agent
-                continue
-
-            path = self.detailed_path_record[agent_id]
-            current_car_summary = '\n'
-            start_node = path[0][0][0]
-            end_node = path[-1][0][1]
-            arrival_time = self.end_times[agent_id]
-            formatted_path = [edge for edge, _ in path]
-            current_car_summary += f'Car {agent_id} ({start_node}, {end_node}), arrived at t={arrival_time}, with path {formatted_path}'
-            output_string += current_car_summary
-        
-        output_string += f'\nAverage congestion is {average_congestion}'
-        output_string += f'\nTotal congestion is {total_congestion}'
-
-        return output_string
-    
-    def calculate_total_congestion(self):
-        """
-        helper to calculate total confestion using detailed_path_record
-        """
-        result = 0
-
-        for agent_id, path in self.detailed_path_record.items():
-            for edge, congestion in path:
-                result += congestion
-        
-        return result
 
 class SmartBrainSimulator:
     """
@@ -214,12 +163,9 @@ class SmartBrainSimulator:
         self._seq = itertools.count()
         self._stopped = False
         self.events_processed = 0
+
         self.graph = graph
-        # self.num_cars_on_edge_at_t = prepopulate_num_cars_at_t(graph)
-        # self.initial_dijkstra_paths = {} # tracks our intially calcuated paths for each agents
-        # self.detailed_path_record = {} # see paper for description
-        # self.end_times = {} # agent_id: time it reached its destination node
-        
+        self.num_tasks = 0 # num tasks successfully completed
         self.available_tasks = [] # format is list of 5-tuples (task-id, location (vertex-id), appear-time, target-time, reward)
         self.available_dashers = [] # list of 3-tuple dashers
         self.total_system_score = 0
@@ -282,7 +228,6 @@ class SmartBrainSimulator:
             reward = payload['reward']
 
             self.available_tasks.append((task_id, location, appear_time, target_time, reward))
-            # print(f'{location=}')
 
         elif event_id == 'DA': # DasherArrival
             start_location = payload['start location']
@@ -290,7 +235,6 @@ class SmartBrainSimulator:
             dasher_exit_time = payload['exit time']
 
             new_dasher_start_time = self.now + 2 # todo can change time maybe
-            # print(f'{start_location=}')
 
             self.schedule_at(new_dasher_start_time, "DS", {'start location': start_location, 'start time': new_dasher_start_time, 'exit time': dasher_exit_time})
         
@@ -299,12 +243,9 @@ class SmartBrainSimulator:
             dasher_start_time = payload['start time']
             dasher_exit_time = payload['exit time']
 
-            # print(f'DS: {start_location=}')
-
             self.available_dashers.append((start_location, dasher_start_time, dasher_exit_time))
 
             feasible_tasks = self.get_feasible_tasks_in_radius(start_location, 5, dasher_start_time, dasher_exit_time)
-            # print(f'{feasible_tasks=}')
 
             # feasible task not found; make the dasher wait more time before searching for a task again
             if not feasible_tasks:
@@ -313,7 +254,6 @@ class SmartBrainSimulator:
                     self.schedule_at(self.now, "DA", {'start location': start_location, 'start time': self.now, 'exit time': dasher_exit_time})
                 return
             
-            # print(f'{feasible_tasks=}')
             best_task = max(feasible_tasks, key=lambda task: task[2]) # highest reward or potentiall highest reward-to-time ratio task
             best_target_time = best_task[1]
             best_reward = best_task[2]
@@ -323,7 +263,6 @@ class SmartBrainSimulator:
             # now, examine other tasks with rewards at least 70% of the best reward we've found so far
             # if any of those tasks have a better reward-to-time ratio, do the task with that highest ratio
             for i, potential_task in enumerate(filter(lambda task: task[2] >= 0.7*best_reward, feasible_tasks)):
-                potential_task_location = potential_task[0] # index 0 is task's location
                 potential_task_target_time = potential_task[1] # index 1 is task's target time
                 potential_reward = potential_task[2]
                 potential_ratio = potential_reward / potential_task_target_time
@@ -354,11 +293,11 @@ class SmartBrainSimulator:
 
             # Add task's reward to the total-system-score
             self.total_system_score += feasible_tasks[best_index][2]
+            self.num_tasks += 1
 
-            # print(f'{self.available_tasks=}')
             # mark task as completed by removing it from available_tasks list
             self.available_tasks = [t for t in self.available_tasks if not (t[1] == new_start_location and t[3] == new_dasher_start_time and t[4] == actual_reward)]
-                
+            
             if best_index == -1:
                 # feasible task not found; make the dasher wait more time before searching for a task again
                 self.schedule_at(self.now, "DA", {'start location': new_start_location, 'start time': self.now, 'exit time': dasher_exit_time})
@@ -384,15 +323,12 @@ class SmartBrainSimulator:
             if current_level < radius:
                 for neighbor, _ in ((graph.getNeighbors(current_node)) + [(start_node, -1)]): # force start_node to be a "neighbor" so we can check if it has tasks
                     neighbor = str(neighbor)
-                    # print(f'{neighbor=}')
                     if neighbor not in visited:
                         visited.add(neighbor)
-                        # print(f'{neighbor=}')
                         queue.append((neighbor, current_level + 1))
 
                         # check if there's any tasks at neighbor node (and possibly start node too)
                         potential_tasks_at_neighbor = list(filter(lambda task: str(task[1]) == str(neighbor), self.available_tasks))
-                        # print(f'{potential_tasks_at_neighbor=}')
                         if potential_tasks_at_neighbor:
                             for potential_task in potential_tasks_at_neighbor:
                                 task_target_time = potential_task[3]
@@ -404,54 +340,9 @@ class SmartBrainSimulator:
                                     and (current_level + dasher_start_time <= dasher_exit_time) \
                                     and (task_appear_time <= dasher_start_time + 2) \
                                     and (dasher_exit_time >= task_target_time):
-                                    # print("here")
                                     # btw, current_level = amount of time for dasher to reach "neighbor" from start_node
                                     result.append((neighbor, task_target_time, reward))
-        # print(f'{result=}')
         return result
-
-
-    def final_results_string(self):
-        """
-        Function to calculate final statistics and make correct format for output printing.
-        Only invoke this function after the simulator is done running.
-        """
-        total_congestion = self.calculate_total_congestion()
-        average_congestion = total_congestion / len(self.detailed_path_record)
-
-        output_string = ""
-
-        # now construct strings of this format: "Car 1 (start_node, end_node), arrived at t=.., with path (e1,t1), (e2,t2), ..."
-        for agent_id in range(len(self.detailed_path_record)):
-            if agent_id not in self.detailed_path_record:
-                # if there's no possible path for this agent
-                continue
-            path = self.detailed_path_record[agent_id]
-            current_car_summary = '\n'
-            start_node = path[0][0][0]
-            end_node = path[-1][0][1]
-            arrival_time = self.end_times[agent_id]
-            formatted_path = [edge for edge, _ in path]
-            current_car_summary += f'Car {agent_id} ({start_node}, {end_node}), arrived at t={arrival_time}, with path {formatted_path}'
-            output_string += current_car_summary
-        
-        output_string += f'\nAverage congestion is {average_congestion}'
-        output_string += f'\nTotal congestion is {total_congestion}'
-
-        return output_string
-    
-    def calculate_total_congestion(self):
-        """
-        helper to calculate total confestion using detailed_path_record
-        """
-        result = 0
-
-        for agent_id, path in self.detailed_path_record.items():
-            for edge, congestion in path:
-                result += congestion
-        
-        return result
-
 
 def baseline_dispatch_dashers(fname, base_sim: BaselineSimulator):
     with open(fname, 'r') as file:
@@ -487,6 +378,8 @@ def schedule_tasks(fname, base_sim):
 
 
 if __name__ == "__main__":
+    # create_task_list('tasklog.csv') # TODO DELETE for testing only
+
     ############## BASELINE SIMULATOR
     graph = read_graph("grid100.txt")
     base_sim = BaselineSimulator(graph)
@@ -498,6 +391,7 @@ if __name__ == "__main__":
     # print(f'{base_sim.available_tasks=}')
     # print(f'{base_sim.available_dashers=}')
     print(f'{base_sim.total_system_score=}')
+    print(f'{base_sim.num_tasks=}\n')
 
     # base_sim = BaselineSimulator(graph)
     # base_sim.schedule_at(0, "T", {'task id': 2, 'location': 5, 'appear time': 0, 'target time': 8, 'reward': 10})
@@ -536,6 +430,7 @@ if __name__ == "__main__":
     smart_dispatch_dashers("dashers.csv", smart_sim)
     smart_sim.run()
     print(f'{smart_sim.total_system_score=}')
+    print(f'{smart_sim.num_tasks=}')
 
 
  ### Machine Learning Forecasting ###
