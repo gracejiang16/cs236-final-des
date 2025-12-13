@@ -5,11 +5,13 @@ import json
 from typing import Any, Optional, Tuple
 from helpers import read_graph
 import csv
-# import pandas as pd
-# from xgboost import XGBRegressor
-# from sklearn.model_selection import train_test_split
-# from sklearn.metrics import mean_squared_error
+import pandas as pd
+from xgboost import XGBRegressor
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error
 import ast
+
+
 
 """
 simple_discrete_event_sim.py
@@ -234,7 +236,7 @@ class SmartBrainSimulator:
             dasher_start_time = payload['start time']
             dasher_exit_time = payload['exit time']
 
-            new_dasher_start_time = self.now + 2 # todo can change time maybe
+            new_dasher_start_time = self.now + 2
 
             self.schedule_at(new_dasher_start_time, "DS", {'start location': start_location, 'start time': new_dasher_start_time, 'exit time': dasher_exit_time})
         
@@ -380,7 +382,7 @@ def schedule_tasks(fname, base_sim):
 if __name__ == "__main__":
     # create_task_list('tasklog.csv') # TODO DELETE for testing only
 
-    ############## BASELINE SIMULATOR
+    ############# BASELINE SIMULATOR
     graph = read_graph("grid100.txt")
     base_sim = BaselineSimulator(graph)
     schedule_tasks("tasks_random_rewards_and_times.json", base_sim)
@@ -435,64 +437,49 @@ if __name__ == "__main__":
 
  ### Machine Learning Forecasting ###
 
+# load file
+    rows = []
 
-# # ============================
-# # 1. Load and parse TXT file
-# # ============================
-#     rows = []
+    with open("available_tasks.txt", "r") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            timestamp, tag, data = ast.literal_eval(line)
+            row = {
+                "timestamp": int(timestamp),
+                "task_id": int(data["task id"]),
+                "location": int(data["location"]),
+                "appear_time": int(data["appear time"]),
+                "target_time": int(data["target time"]),
+                "reward": int(data["reward"]),
+            }
+            rows.append(row)
 
-#     with open("available_tasks.txt", "r") as f:
-#         for line in f:
-#             line = line.strip()
-#             if not line:
-#                 continue
+    df = pd.DataFrame(rows)
+    print("Loaded dataset:")
+    print(df.head())
 
-#             # Each line looks like:
-#             # (1080, 'T', {'task id': 1, 'location': '38', ...})
-#             timestamp, tag, data = ast.literal_eval(line)
+# create features
+    X = df[["task_id", "location", "appear_time", "target_time"]]
+    y = df["reward"]
 
-#             row = {
-#                 "timestamp": int(timestamp),
-#                 "task_id": int(data["task id"]),
-#                 "location": int(data["location"]),
-#                 "appear_time": int(data["appear time"]),
-#                 "target_time": int(data["target time"]),
-#                 "reward": int(data["reward"]),
-#             }
-#             rows.append(row)
+# train/test split for xgboost model
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42
+    )
 
-#     df = pd.DataFrame(rows)
-#     print("Loaded dataset:")
-#     print(df.head())
+# train xgboost model
+    model = XGBRegressor(
+        n_estimators=300,
+        max_depth=6,
+        learning_rate=0.1,
+    )
 
-#     # ============================
-#     # 2. Features/target
-#     # ============================
-#     X = df[["task_id", "location", "appear_time", "target_time"]]
-#     y = df["reward"]
+    model.fit(X_train, y_train)
 
-#     # ============================
-#     # 3. Train/test split
-#     # ============================
-#     X_train, X_test, y_train, y_test = train_test_split(
-#         X, y, test_size=0.2, random_state=42
-#     )
+# evaluate efficiency with rmse
+    preds = model.predict(X_test)
+    rmse = mean_squared_error(y_test, preds, squared=False)
 
-#     # ============================
-#     # 4. Train XGBoost model
-#     # ============================
-#     model = XGBRegressor(
-#         n_estimators=300,
-#         max_depth=6,
-#         learning_rate=0.1,
-#     )
-
-#     model.fit(X_train, y_train)
-
-#     # ============================
-#     # 5. Evaluate
-#     # ============================
-#     preds = model.predict(X_test)
-#     rmse = mean_squared_error(y_test, preds, squared=False)
-
-#     print("\nRMSE:", rmse)
+    print("\nRMSE:", rmse)
