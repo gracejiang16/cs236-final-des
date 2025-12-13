@@ -1,4 +1,5 @@
 import csv
+import json
 import random
 
 
@@ -350,6 +351,33 @@ def prepopulate_num_cars_at_t(graph):
             result[((a, neighbor), 0)] = 0
     return result
 
+def create_task_list(fname):
+    """
+    function to randomly generate times/rewards for tasks read in from the tasklog.csv file, so that
+    we can remove uncertainty from our simulator
+
+    writes results in json file
+
+    returns a python list of task payloads.
+    """
+    with open(fname, 'r') as file:
+        reader = csv.reader(file)
+        next(reader)
+
+        task_payloads = []
+        for task_id, dasher_line in enumerate(reader):
+            user_id, vertex, _, time = dasher_line
+            user_id, vertex, time = int(user_id), int(vertex), int(time)
+            appear_time = time - (random.randint(5, 10))
+            reward = random.randint(1, 100)
+            payload = {'task id': task_id, 'location': str(vertex), 'appear time': appear_time, 'target time': time, 'reward': reward}
+            task_payloads.append(payload)
+
+        with open("tasks_random_rewards_and_times.json", "w") as f:
+            json.dump(task_payloads, f)
+        
+        return task_payloads
+
 # def dispatch_dashers(fname, base_sim):
 #     with open(fname, 'r') as file:
 #         reader = csv.reader(file)
@@ -373,3 +401,5 @@ def prepopulate_num_cars_at_t(graph):
 #             reward = random.randint(1, 100) 
 #             base_sim.schedule_at(time, "T", {'task id': task_id, 'location': vertex, 'appear time': appear_time, 'target time': time, 'reward': reward})
 #             task_id += 1
+
+# create_task_list('tasklog.csv')
